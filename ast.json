@@ -1,0 +1,13 @@
+{
+    "kind": "Program",
+    "body": [
+        {
+            "kind": "CallExpr",
+            "caller": {
+                "kind": "Identifier",
+                "symbol": "import"
+            },
+            "args": []
+        }
+    ]
+}

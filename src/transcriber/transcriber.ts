@@ -1,0 +1,309 @@
+import { Program } from "../../../bussin/dist/frontend/ast";
+import { AssignmentExpr, BinaryExpr, CallExpr, ForStatement, FunctionDeclaration, Identifier, IfStatement, MemberExpr, NumericLiteral, ObjectLiteral, Stmt, StringLiteral, TryCatchStatement, VarDeclaration } from "../bussin_parser/ast";
+
+export class Transcriber {
+
+    private trycatchCounter: number = 0;
+
+    private beginCode: string = "";
+
+    private math_sqrt: boolean = false;
+    private math_round: boolean = false;
+    private error: boolean = false;
+    private exec: boolean = false;
+    private charat: boolean = false;
+    private input: boolean = false;
+    private strcon: boolean = false;
+    private format: boolean = false;
+    private setTimeout: boolean = false;
+    private setInterval: boolean = false;
+    private fetch: boolean = false;
+    private fs_read: boolean = false;
+    private fs_write: boolean = false;
+    private fs_exists: boolean = false;
+    private fs_rmdir: boolean = false;
+    private objects_hasKey: boolean = false;
+    private objects_get: boolean = false;
+    private objects_set: boolean = false;
+
+    transcribe(ast: Program): string {
+        let program = "";
+        ast.body.forEach(value => {
+            program += this.transcribeStmt(value, 0);
+        });
+        if(this.beginCode != "") {
+            program = `--begin bstolua data--\n\n${this.beginCode}\n--end bstolua data--\n\n${program}`;
+        }
+        return program;
+    }
+
+    private defaultFunctionFix(functionName: string): string {
+        switch(functionName) {
+
+            // 2 characters !!!
+            case "println":
+                return "print";
+
+            // string stuff
+            case "len":
+                return "string.len";
+            case "charat":
+                if(!this.charat) {
+                    this.charat = true;
+                    this.beginCode += `function bstolua_charat(s,n)\nreturn string.sub(s,n-1,n-1)\nend\n`;
+                }
+                return "bstolua_charat";
+            case "input":
+                if(!this.input) {
+                    this.input = true;
+                    this.beginCode += `function bstolua_input(s)\io.write(s)\nio.flush()\nreturn io.read()\nend\n`;
+                }
+                return "bstolua_input";
+            case "strcon":
+                if(!this.strcon) {
+                    this.strcon = true;
+                    this.beginCode += `function bstolua_strcon(...)\nlocal result=""\nfor i,v in ipairs({...}) do\nresult=result..v\nend\nreturn result\nend\n`;
+                }
+                return "bstolua_strcon";
+            case "format":
+                if(!this.format) {
+                    this.format = true;
+                    this.beginCode += `function bstolua_format(f, ...)\nlocal a={...}\nlocal r=f:gsub("%\${}","%%s")\nreturn string.format(r,unpack(a))\nend\n`;
+                }
+                return "bstolua_format";
+
+            // face made his math stuff the same as lua! well, except for the fact that lua doesn't have sqrt or round though. WHY!?!?!
+            case "math.sqrt":
+                if(!this.math_sqrt) {
+                    this.math_sqrt = true;
+                    this.beginCode += `function bstolua_math_sqrt(n)\nreturn n^0.5\nend\n`;
+                }
+                return "bstolua_math_sqrt";
+            case "math.round":
+                if(!this.math_round) {
+                    this.math_round = true;
+                    this.beginCode += `function bstolua_math_round(n)\nreturn math.floor(n+0.5)\nend\n`;
+                }
+                return "bstolua_math_round"
+
+            // time
+            case "time":
+                return "os.time";
+
+            // exec
+            case "exec":
+                if(!this.exec) {
+                    this.exec = true;
+                    this.beginCode += `function bstolua_exec(c)\nlocal h=io.popen(c)\nlocal r=h:read("*a")\nh:close()\nreturn r\nend\n`;
+                }
+                return "bstolua_exec";
+
+            // surprisingly i didnt have to change much for these to work. yay to lua?
+            case "setTimeout":
+                if(!this.setTimeout) {
+                    this.setTimeout = true;
+                    this.beginCode += `function bstolua_setTimeout(c,t)\nlocal s=os.clock()\nrepeat until os.clock()>s+(t/1000)\nc()\nend\n`;
+                }
+                return "bstolua_setTimeout";
+            case "setInterval":
+                if(!this.setInterval) {
+                    this.setInterval = true;
+                    this.beginCode += `function bstolua_setInterval(c,t)\nlocal s=os.clock()\nrepeat until os.clock()>s+(t/1000)\nc()\nbstolua_setInterval(c,t)\nend\n`;
+                }
+                return "bstolua_setInterval";
+
+            // wtf
+            case "fetch":
+                if(!this.fetch) {
+                    this.fetch = true;
+                    this.beginCode += `function bstolua_fetch(p, o)\no = o or {}\nlocal h\nlocal m = o.method or "GET"\nlocal b = o.body or ""\nlocal w = package.config:sub(1, 1) == "\\\\"\nlocal c\nif w then\nc = "certutil -urlcache -split -f " .. p\nelse\nc = "curl -X " .. m .. " -d " .. b .. " " .. p\nend\nh = io.popen(c)\nif not h then\nreturn nil, "Failed to execute command: " .. c\nend\nlocal c = h:read("*a")\nh:close()\nreturn c\nend\n`;
+                }
+                return "bstolua_fetch";
+
+            // nevermind kys lua
+            case "fs.read":
+                if(!this.fs_read) {
+                    this.fs_read = true;
+                    this.beginCode += `function bstolua_fs_read(f)\nlocal g=io.open(f, "r")\nlocal c=g:read("*a")\nio.close(g)\nreturn c\nend\n`;
+                }
+                return "bstolua_fs_read";
+            case "fs.write":
+                if(!this.fs_write) {
+                    this.fs_write = true;
+                    this.beginCode += `function bstolua_fs_write(f,d)\nlocal g=io.open(f, "w")\ng:write(d)\nio.close(g)\nend\n`;
+                }
+                return "bstolua_fs_write";
+            case "fs.exists":
+                if(!this.fs_exists) {
+                    this.fs_exists = true;
+                    this.beginCode += `function bstolua_fs_exists(f)\nlocal g=io.open(f, "r")\nif g then\nio.close(g)\nreturn true\nreturn false\nend\n`
+                }
+                return "bstolua_fs_exists";
+            case "fs.rmdir":
+                if(!this.fs_rmdir) {
+                    this.fs_rmdir = true;
+                    this.beginCode += `function bstolua_fs_rmdir(f)\nif package.config:sub(1,1)=="\\\\" then\nos.execute("rmdir /s /q \\""..f.."\\"")\nelse\nos.execute("rm -r \\""..f.."\\"")\nend\n`;
+                }
+                return "bstolua_fs_rmdir";
+            case "fs.rm":
+                return "os.remove";
+
+            // these are very simple but since this just changes function name i gotta include it :sob:
+            case "objects.hasKey":
+                if(!this.objects_hasKey) {
+                    this.objects_hasKey = true;
+                    this.beginCode += `function bstolua_objects_hasKey(o,k)\nreturn o[k]~=nil\nend\n`;
+                }
+                return "bstolua_objects_hasKey";
+            case "objects.get":
+                if(!this.objects_get) {
+                    this.objects_get = true;
+                    this.beginCode += `function bstolua_objects_get(o,k)\nreturn o[k]\nend\n`;
+                }
+                return "bstolua_objects_get";
+            case "objects.set":
+                if(!this.objects_set) {
+                    this.objects_set = true;
+                    this.beginCode += `function bstolua_objects_set(o,k,v)\no[k]=v\nend\n`;
+                }
+                return "bstolua_objects_set";
+
+            // silly billy exit command :3
+            case "exit":
+                return "os.exit";
+
+            // possible but i'd have to transcribe every file imported into lua and then also make a bstolua_import() for lua import and change .bs to lua and ahahhahashdhsfhsdahf it's so late
+            case "import":
+                throw "import() is not supported by this transcriber. This is because.. I'm too tired right now.";
+
+            default:
+                return functionName;
+        }
+    }
+
+    private defaultVariableFix(variableName: string): string {
+        switch(variableName) {
+            case "null":
+                return "nil";
+            case "args":
+                return "arg";
+            default:
+                return variableName;
+        }
+    }
+
+    private transcribeStmt(value: Stmt, scopeIndex: number): string {
+        let response = "";
+        switch(value.kind) {
+            case "NumericLiteral":
+                response = (value as NumericLiteral).value.toString();
+                break;
+            case "FunctionDeclaration": {
+                const expr = (value as FunctionDeclaration);
+                let fn = `function${scopeIndex != Number.MIN_VALUE ? " " + expr.name : ""}(${expr.parameters.join(",")})`;
+                expr.body.forEach((value, index) => {
+                    fn += `${index + 1 == expr.body.length && value.kind != "NewLine" ? "return " : ""}${this.transcribeStmt(value, 0)}`;
+                });
+                response = `${fn}end`;
+                break;
+            }
+            case "CallExpr": {
+                const expr = (value as CallExpr);
+                response = `${this.defaultFunctionFix(this.transcribeStmt(expr.caller, 0))}(${expr.args.map((val) => this.transcribeStmt(val, Number.MIN_VALUE)).join(", ")})`;
+                break;
+            }
+            case "StringLiteral":
+                return `"${(value as StringLiteral).value}"`;
+            case "Identifier":
+                return this.defaultVariableFix((value as Identifier).symbol);
+            case "VarDeclaration": {
+                const expr = (value as VarDeclaration);
+                response = `local ${expr.identifier} = ${this.transcribeStmt(expr.value, 0)};`;
+                break;
+            }
+            case "NewLine":
+                return "\n";
+            case "IfStatement": {
+                const expr = (value as IfStatement);
+                let ifVal = `if ${this.transcribeStmt(expr.test, 0)} then`;
+                expr.body.forEach((value) => {
+                    ifVal += this.transcribeStmt(value, scopeIndex + 1);
+                });
+                let alternate = "end";
+                if(expr.alternate.length > 0) {
+                    let first;
+                    do {
+                        first = expr.alternate.shift();
+                    } while(first.kind == "NewLine");
+                    if(first.kind == "IfStatement") {
+                        alternate = `else${this.transcribeStmt(first, 0)}`;
+                    } else {
+                        expr.alternate.push(first);
+                        alternate = `else${expr.alternate.map(val => this.transcribeStmt(val, Math.abs(scopeIndex + 1))).join("")}\nend`;
+                    }
+                }
+                response = `${ifVal}${alternate}`;
+                break;
+            }
+            case "BinaryExpr": {
+                const expr = (value as BinaryExpr);
+                let operator;
+                switch(expr.operator) {
+                    case "&&":
+                        operator = "and";
+                        break;
+                    case "|":
+                        operator = "or";
+                        break;
+                    case "!=":
+                        operator = "~=";
+                        break;
+                    default:
+                        operator = expr.operator;
+                        break;
+                }
+                return `${this.transcribeStmt(expr.left, 0)} ${operator} ${this.transcribeStmt(expr.right, 0)}`;
+            }
+            case "ObjectLiteral": {
+                const expr = (value as ObjectLiteral);
+                return `{ ${expr.properties.map(val => val.value ? `${val.key} = ${this.transcribeStmt(val.value, 0)}` : `${val.key} = ${val.key}`).join(", ")} }`;
+            }
+            case "TryCatchStatement": {
+                const expr = (value as TryCatchStatement);
+                response = response.concat(
+                    `local bstolua_success_${this.trycatchCounter}, bstolua_err_${this.trycatchCounter} = pcall(function()`,
+                    expr.body.map(val => this.transcribeStmt(val, Math.abs(scopeIndex + 1))).join(""),
+                    `end)\nif not bstolua_success_${this.trycatchCounter} then\nerror = bstolua_err_${this.trycatchCounter};`,
+                    expr.alternate.map(val => this.transcribeStmt(val, Math.abs(scopeIndex + 1))).join(""),
+                    `end`
+                );
+                if(!this.error) {
+                    this.error = true;
+                    this.beginCode += `local error = "";\n`;
+                }
+                this.trycatchCounter++;
+                break;
+            }
+            case "MemberExpr": {
+                const expr = (value as MemberExpr);
+                const symbol = this.transcribeStmt(expr.object, 0);
+                const prop = this.transcribeStmt(expr.property, 0);
+                return `${symbol}.${prop}`;
+            }
+            case "ForStatement": {
+                const expr = (value as ForStatement);
+                response = `${this.transcribeStmt(expr.init, 0)}\nwhile ${this.transcribeStmt(expr.test, 0)} do\n${expr.body.map(val => this.transcribeStmt(val, Math.abs(scopeIndex + 1))).join("")}\n${this.transcribeStmt(expr.update, Math.abs(scopeIndex + 1))}\nend`;
+                break;
+            }
+            case "AssignmentExpr": {
+                const expr = (value as AssignmentExpr);
+                response = `${this.transcribeStmt(expr.assigne, 0)} = ${this.transcribeStmt(expr.value, 0)}`;
+                break;
+            }
+            default:
+                response = `<No transcription for "${value.kind}">`;
+                break;
+        }
+        return `${response}`;
+    }
+}
