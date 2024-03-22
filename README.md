@@ -1,3 +1,4 @@
 # Bussin to Lua
 
-Easy to use.
+Converts Bussin / Bussin X code to Lua code.
+Made for GriddyCode.
