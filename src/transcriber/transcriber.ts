@@ -1,5 +1,6 @@
 import { Program } from "../../../bussin/dist/frontend/ast";
 import { AssignmentExpr, BinaryExpr, CallExpr, ForStatement, FunctionDeclaration, Identifier, IfStatement, MemberExpr, NumericLiteral, ObjectLiteral, Stmt, StringLiteral, TryCatchStatement, VarDeclaration } from "../bussin_parser/ast";
+const luamin = require('lua-format');
 
 export class Transcriber {
 
@@ -27,14 +28,11 @@ export class Transcriber {
     private objects_set: boolean = false;
 
     transcribe(ast: Program): string {
-        let program = "";
-        ast.body.forEach(value => {
-            program += this.transcribeStmt(value, 0);
-        });
+        let program = this.transcribeStmt(ast, 0)
         if(this.beginCode != "") {
             program = `--begin bstolua data--\n\n${this.beginCode}\n--end bstolua data--\n\n${program}`;
         }
-        return program;
+        return luamin.Beautify(program, {RenameVariables: false, RenameGlobals: false, SolveMath: false}).substring(58);
     }
 
     private defaultFunctionFix(functionName: string): string {
@@ -187,30 +185,50 @@ export class Transcriber {
                 return "nil";
             case "args":
                 return "arg";
+            case "break":
+                return "_break";
+            case "return":
+                return "_return";
             default:
                 return variableName;
         }
     }
 
-    private transcribeStmt(value: Stmt, scopeIndex: number): string {
-        let response = "";
+    private transcribeStmt(value: Stmt, depthInfo: number): string {
         switch(value.kind) {
+            case "Program":
+                let res = "";
+                (value as Program).body.forEach(value => {
+                    res += this.transcribeStmt(value, 0);
+                })
+                return res;
             case "NumericLiteral":
-                response = (value as NumericLiteral).value.toString();
-                break;
+                return (value as NumericLiteral).value.toString();
             case "FunctionDeclaration": {
                 const expr = (value as FunctionDeclaration);
-                let fn = `function${scopeIndex != Number.MIN_VALUE ? " " + expr.name : ""}(${expr.parameters.join(",")})`;
+                let fn = `function${depthInfo != Number.MIN_VALUE ? " " + expr.name : ""}(${expr.parameters.join(",")})`;
+                let returnedAlready = false;
                 expr.body.forEach((value, index) => {
-                    fn += `${index + 1 == expr.body.length && value.kind != "NewLine" ? "return " : ""}${this.transcribeStmt(value, 0)}`;
-                });
-                response = `${fn}end`;
-                break;
+                    if(!returnedAlready) {
+                        let addReturn = true;
+                        for (let i = index + 1; i < expr.body.length; i++) {
+                            if (expr.body[i].kind !== "NewLine") {
+                                addReturn = false;
+                                break;
+                            }
+                        }
+                        if(addReturn) {
+                            fn += "return ";
+                            returnedAlready = true;
+                        }
+                    }
+                    fn += this.transcribeStmt(value, 0);
+                });                
+                return `${fn}end`;
             }
             case "CallExpr": {
                 const expr = (value as CallExpr);
-                response = `${this.defaultFunctionFix(this.transcribeStmt(expr.caller, 0))}(${expr.args.map((val) => this.transcribeStmt(val, Number.MIN_VALUE)).join(", ")})`;
-                break;
+                return `${this.defaultFunctionFix(this.transcribeStmt(expr.caller, 0))}(${expr.args.map((val) => this.transcribeStmt(val, Number.MIN_VALUE)).join(", ")})`;
             }
             case "StringLiteral":
                 return `"${(value as StringLiteral).value}"`;
@@ -218,8 +236,7 @@ export class Transcriber {
                 return this.defaultVariableFix((value as Identifier).symbol);
             case "VarDeclaration": {
                 const expr = (value as VarDeclaration);
-                response = `local ${expr.identifier} = ${this.transcribeStmt(expr.value, 0)};`;
-                break;
+                return `local ${this.defaultVariableFix(expr.identifier)} = ${this.transcribeStmt(expr.value, 0)};`;
             }
             case "NewLine":
                 return "\n";
@@ -227,7 +244,7 @@ export class Transcriber {
                 const expr = (value as IfStatement);
                 let ifVal = `if ${this.transcribeStmt(expr.test, 0)} then`;
                 expr.body.forEach((value) => {
-                    ifVal += this.transcribeStmt(value, scopeIndex + 1);
+                    ifVal += this.transcribeStmt(value, depthInfo);
                 });
                 let alternate = "end";
                 if(expr.alternate.length > 0) {
@@ -239,11 +256,11 @@ export class Transcriber {
                         alternate = `else${this.transcribeStmt(first, 0)}`;
                     } else {
                         expr.alternate.push(first);
-                        alternate = `else${expr.alternate.map(val => this.transcribeStmt(val, Math.abs(scopeIndex + 1))).join("")}\nend`;
+                        // WHY DO I HAVE TO REVERSE THIS.WHTA THE FUCK FACE
+                        alternate = `else\n${expr.alternate.reverse().map(val => this.transcribeStmt(val, 0)).join("")}\nend`;
                     }
                 }
-                response = `${ifVal}${alternate}`;
-                break;
+                return `${ifVal}${alternate}`;
             }
             case "BinaryExpr": {
                 const expr = (value as BinaryExpr);
@@ -262,7 +279,8 @@ export class Transcriber {
                         operator = expr.operator;
                         break;
                 }
-                return `${this.transcribeStmt(expr.left, 0)} ${operator} ${this.transcribeStmt(expr.right, 0)}`;
+                const res = `${this.transcribeStmt(expr.left, 0)} ${operator} ${this.transcribeStmt(expr.right, 0)}`;
+                return expr.right.kind != "BinaryExpr" ? `(${res})` : res;
             }
             case "ObjectLiteral": {
                 const expr = (value as ObjectLiteral);
@@ -270,11 +288,10 @@ export class Transcriber {
             }
             case "TryCatchStatement": {
                 const expr = (value as TryCatchStatement);
-                response = response.concat(
-                    `local bstolua_success_${this.trycatchCounter}, bstolua_err_${this.trycatchCounter} = pcall(function()`,
-                    expr.body.map(val => this.transcribeStmt(val, Math.abs(scopeIndex + 1))).join(""),
+                const res = `local bstolua_success_${this.trycatchCounter}, bstolua_err_${this.trycatchCounter} = pcall(function()`.concat(
+                    expr.body.map(val => this.transcribeStmt(val, 0)).join(""),
                     `end)\nif not bstolua_success_${this.trycatchCounter} then\nerror = bstolua_err_${this.trycatchCounter};`,
-                    expr.alternate.map(val => this.transcribeStmt(val, Math.abs(scopeIndex + 1))).join(""),
+                    expr.alternate.map(val => this.transcribeStmt(val, 0)).join(""),
                     `end`
                 );
                 if(!this.error) {
@@ -282,7 +299,7 @@ export class Transcriber {
                     this.beginCode += `local error = "";\n`;
                 }
                 this.trycatchCounter++;
-                break;
+                return res;
             }
             case "MemberExpr": {
                 const expr = (value as MemberExpr);
@@ -292,18 +309,14 @@ export class Transcriber {
             }
             case "ForStatement": {
                 const expr = (value as ForStatement);
-                response = `${this.transcribeStmt(expr.init, 0)}\nwhile ${this.transcribeStmt(expr.test, 0)} do\n${expr.body.map(val => this.transcribeStmt(val, Math.abs(scopeIndex + 1))).join("")}\n${this.transcribeStmt(expr.update, Math.abs(scopeIndex + 1))}\nend`;
-                break;
+                return `${this.transcribeStmt(expr.init, 0)}\nwhile ${this.transcribeStmt(expr.test, 0)} do\n${this.transcribeStmt(expr.update, 0)}\n${expr.body.map(val => this.transcribeStmt(val, 0)).join("")}\nend`;
             }
             case "AssignmentExpr": {
                 const expr = (value as AssignmentExpr);
-                response = `${this.transcribeStmt(expr.assigne, 0)} = ${this.transcribeStmt(expr.value, 0)}`;
-                break;
+                return `${this.defaultVariableFix(this.transcribeStmt(expr.assigne, 0))} = ${this.transcribeStmt(expr.value, 0)}`;
             }
             default:
-                response = `<No transcription for "${value.kind}">`;
-                break;
+                return `<No transcription for "${value.kind}">`;
         }
-        return `${response}`;
     }
 }
