@@ -1,6 +1,5 @@
 import { Program } from "../../../bussin/dist/frontend/ast";
-import { AssignmentExpr, BinaryExpr, CallExpr, ForStatement, FunctionDeclaration, Identifier, IfStatement, MemberExpr, NumericLiteral, ObjectLiteral, Stmt, StringLiteral, TryCatchStatement, VarDeclaration } from "../bussin_parser/ast";
-const luamin = require('lua-format');
+import { ArrayLiteral, AssignmentExpr, BinaryExpr, CallExpr, ForStatement, FunctionDeclaration, Identifier, IfStatement, MemberExpr, NumericLiteral, ObjectLiteral, Stmt, StringLiteral, TryCatchStatement, VarDeclaration } from "../bussin_parser/ast";
 
 export class Transcriber {
 
@@ -32,7 +31,7 @@ export class Transcriber {
         if(this.beginCode != "") {
             program = `--begin bstolua data--\n\n${this.beginCode}\n--end bstolua data--\n\n${program}`;
         }
-        return luamin.Beautify(program, {RenameVariables: false, RenameGlobals: false, SolveMath: false}).substring(58);
+        return program;
     }
 
     private defaultFunctionFix(functionName: string): string {
@@ -279,12 +278,22 @@ export class Transcriber {
                         operator = expr.operator;
                         break;
                 }
-                const res = `${this.transcribeStmt(expr.left, 0)} ${operator} ${this.transcribeStmt(expr.right, 0)}`;
-                return expr.right.kind != "BinaryExpr" ? `(${res})` : res;
+                // idk it works
+                let left = `${this.transcribeStmt(expr.left, 0)}`;
+                let right = `${this.transcribeStmt(expr.right, 0)}`;
+                if(expr.right.kind == "BinaryExpr") {
+                    if(expr.left.kind == "BinaryExpr") left = `(${left})`;
+                    if(operator == "*" || operator == "/") right = `(${right})`;
+                }
+                return `${left} ${operator} ${right}`;
             }
             case "ObjectLiteral": {
                 const expr = (value as ObjectLiteral);
                 return `{ ${expr.properties.map(val => val.value ? `${val.key} = ${this.transcribeStmt(val.value, 0)}` : `${val.key} = ${val.key}`).join(", ")} }`;
+            }
+            case "ArrayLiteral": {
+                const expr = (value as ArrayLiteral);
+                return `{ ${expr.values.map(val => this.transcribeStmt(val, 0))} }`;
             }
             case "TryCatchStatement": {
                 const expr = (value as TryCatchStatement);
@@ -305,7 +314,7 @@ export class Transcriber {
                 const expr = (value as MemberExpr);
                 const symbol = this.transcribeStmt(expr.object, 0);
                 const prop = this.transcribeStmt(expr.property, 0);
-                return `${symbol}.${prop}`;
+                return expr.property.kind == "NumericLiteral" ? `${symbol}[${prop}]` : `${symbol}.${prop}`;
             }
             case "ForStatement": {
                 const expr = (value as ForStatement);

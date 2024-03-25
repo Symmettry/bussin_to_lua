@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import { get_currency, bsx_transcribe } from "./bussin_parser/bussinx/bsx_transcriber";
 import { Transcriber } from "./transcriber/transcriber";
 import Parser from "./bussin_parser/parser"
+const luamin = require('lua-format');
 
 const args = process.argv;
     args.shift();
@@ -29,6 +30,13 @@ const args = process.argv;
     fs.writeFileSync("./ast.json", JSON.stringify(program, null, 4));
 
     // @ts-ignore
-    fs.writeFileSync(file.substring(0, file.lastIndexOf(".")) + ".lua", new Transcriber().transcribe(program));
+    const transcribed = new Transcriber().transcribe(program);
+
+    const newPath = file.substring(0, file.lastIndexOf(".")) + ".lua";
+
+    fs.writeFileSync(newPath, transcribed);
+
+    // if luamin throws an error, it will keep non-beautified.
+    fs.writeFileSync(newPath, luamin.Beautify(transcribed, {RenameVariables: false, RenameGlobals: false, SolveMath: false}).substring(58));
 
 })();
