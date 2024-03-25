@@ -1,5 +1,5 @@
 import { Program } from "../../../bussin/dist/frontend/ast";
-import { ArrayLiteral, AssignmentExpr, BinaryExpr, CallExpr, ForStatement, FunctionDeclaration, Identifier, IfStatement, MemberExpr, NumericLiteral, ObjectLiteral, Stmt, StringLiteral, TryCatchStatement, VarDeclaration } from "../bussin_parser/ast";
+import { ArrayLiteral, AssignmentExpr, BinaryExpr, CallExpr, ForStatement, FunctionDeclaration, Identifier, IfStatement, MemberExpr, NodeType, NumericLiteral, ObjectLiteral, Stmt, StringLiteral, TryCatchStatement, VarDeclaration } from "../bussin_parser/ast";
 
 export class Transcriber {
 
@@ -208,7 +208,7 @@ export class Transcriber {
                 let fn = `function${depthInfo != Number.MIN_VALUE ? " " + expr.name : ""}(${expr.parameters.join(",")})`;
                 let returnedAlready = false;
                 expr.body.forEach((value, index) => {
-                    if(!returnedAlready) {
+                    if(!returnedAlready && this.canReturn(value.kind)) {
                         let addReturn = true;
                         for (let i = index + 1; i < expr.body.length; i++) {
                             if (expr.body[i].kind !== "NewLine") {
@@ -230,7 +230,7 @@ export class Transcriber {
                 return `${this.defaultFunctionFix(this.transcribeStmt(expr.caller, 0))}(${expr.args.map((val) => this.transcribeStmt(val, Number.MIN_VALUE)).join(", ")})`;
             }
             case "StringLiteral":
-                return `"${(value as StringLiteral).value.replace(/"/g, `"..'"'.."`)}"`;
+                return `"${(value as StringLiteral).value.replace(/"/g, `"..'"'.."`).split("\n").join("\\n")}"`;
             case "Identifier":
                 return this.defaultVariableFix((value as Identifier).symbol);
             case "VarDeclaration": {
@@ -318,7 +318,7 @@ export class Transcriber {
             }
             case "ForStatement": {
                 const expr = (value as ForStatement);
-                return `${this.transcribeStmt(expr.init, 0)}\nwhile ${this.transcribeStmt(expr.test, 0)} do\n${this.transcribeStmt(expr.update, 0)}\n${expr.body.map(val => this.transcribeStmt(val, 0)).join("")}\nend`;
+                return `${this.transcribeStmt(expr.init, 0)}\nwhile ${this.transcribeStmt(expr.test, 0)} do\n${expr.body.map(val => this.transcribeStmt(val, 0)).join("")}\n${this.transcribeStmt(expr.update, 0)}\nend`;
             }
             case "AssignmentExpr": {
                 const expr = (value as AssignmentExpr);
@@ -326,6 +326,22 @@ export class Transcriber {
             }
             default:
                 return `<No transcription for "${value.kind}">`;
+        }
+    }
+    canReturn(kind: NodeType): boolean {
+        switch(kind) {
+            case "ArrayLiteral":
+            case "BinaryExpr":
+            case "CallExpr":
+            case "Identifier":
+            case "FunctionDeclaration":
+            case "MemberExpr":
+            case "NumericLiteral":
+            case "ObjectLiteral":
+            case "StringLiteral":
+                return true;
+            default:
+                return false;
         }
     }
 }
