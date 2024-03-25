@@ -114,7 +114,7 @@ export class Transcriber {
             case "fetch":
                 if(!this.fetch) {
                     this.fetch = true;
-                    this.beginCode += `function bstolua_fetch(p, o)\no = o or {}\nlocal h\nlocal m = o.method or "GET"\nlocal b = o.body or ""\nlocal w = package.config:sub(1, 1) == "\\\\"\nlocal c\nif w then\nc = "certutil -urlcache -split -f " .. p\nelse\nc = "curl -X " .. m .. " -d " .. b .. " " .. p\nend\nh = io.popen(c)\nif not h then\nreturn nil, "Failed to execute command: " .. c\nend\nlocal c = h:read("*a")\nh:close()\nreturn c\nend\n`;
+                    this.beginCode += `function bstolua_fetch(p, o)\no = o or {}\nlocal h\nlocal m = o.method or "GET"\nlocal b = o.body or ""\nlocal c = "curl -s -X " .. m\nif b ~= "" then\nc = c .. " -d '" .. b .. "'"\nend\nc = c .. " " .. p\nh = io.popen(c)\nif not h then\nreturn nil, "Failed to execute command: " .. c\nend\nlocal c = h:read("*a")\nh:close()\nreturn c\nend\n`;
                 }
                 return "bstolua_fetch";
 
