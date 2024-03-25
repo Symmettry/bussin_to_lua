@@ -114,7 +114,7 @@ export class Transcriber {
             case "fetch":
                 if(!this.fetch) {
                     this.fetch = true;
-                    this.beginCode += `function bstolua_fetch(p, o)\no = o or {}\nlocal h\nlocal m = o.method or "GET"\nlocal b = o.body or ""\nlocal c = "curl -s -X " .. m\nif b ~= "" then\nc = c .. " -d '" .. b .. "'"\nend\nc = c .. " " .. p\nh = io.popen(c)\nif not h then\nreturn nil, "Failed to execute command: " .. c\nend\nlocal c = h:read("*a")\nh:close()\nreturn c\nend\n`;
+                    this.beginCode += `function bstolua_fetch(p, o)\n\to = o or {}\n\tlocal h\n\tlocal m = o.method or "GET"\n\tlocal b = o.body or ""\nlocal t = "Content-Type: " .. (o.content_type or "text/plain")\n\tlocal c = "curl -s -X " .. m .. " " .. p .. ' -H "' .. t .. '"'\n\tif b ~= "" then\n\t\tc = c .. ' -d "' .. string.gsub(b, '"', '\\\\"') .. '"'\n\tend\n\th = io.popen(c)\n\tif not h then\n\t\treturn nil, "Failed to execute command: " .. c\n\tend\n\tlocal c = h:read("*a")\n\th:close()\n\treturn c\nend\n`;
                 }
                 return "bstolua_fetch";
 
@@ -231,7 +231,7 @@ export class Transcriber {
                 return `${this.defaultFunctionFix(this.transcribeStmt(expr.caller, 0))}(${expr.args.map((val) => this.transcribeStmt(val, Number.MIN_VALUE)).join(", ")})`;
             }
             case "StringLiteral":
-                return `"${(value as StringLiteral).value}"`;
+                return `"${(value as StringLiteral).value.replace(/"/g, `"..'"'.."`)}"`;
             case "Identifier":
                 return this.defaultVariableFix((value as Identifier).symbol);
             case "VarDeclaration": {
