@@ -37,6 +37,6 @@ const args = process.argv;
     fs.writeFileSync(newPath, transcribed);
 
     // if luamin throws an error, it will keep non-beautified.
-    fs.writeFileSync(newPath, luamin.Beautify(transcribed, {RenameVariables: false, RenameGlobals: false, SolveMath: false}).substring(58));
+    fs.writeFileSync(newPath, luamin.Beautify(transcribed, {RenameVariables: false, RenameGlobals: false, SolveMath: true}).substring(58));
 
 })();

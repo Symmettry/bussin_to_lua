@@ -7,24 +7,30 @@ export class Transcriber {
 
     private beginCode: string = "";
 
-    private math_sqrt: boolean = false;
-    private math_round: boolean = false;
-    private error: boolean = false;
-    private exec: boolean = false;
-    private charat: boolean = false;
-    private input: boolean = false;
-    private strcon: boolean = false;
-    private format: boolean = false;
-    private setTimeout: boolean = false;
-    private setInterval: boolean = false;
-    private fetch: boolean = false;
-    private fs_read: boolean = false;
-    private fs_write: boolean = false;
-    private fs_exists: boolean = false;
-    private fs_rmdir: boolean = false;
-    private objects_hasKey: boolean = false;
-    private objects_get: boolean = false;
-    private objects_set: boolean = false;
+    private added: string[] = [];
+
+    private bstolua_code: {[key: string]: string} = {
+        "println": `function bstolua_println(t)\nif bstolua_tryfixprint ~= t then\nprint(t)\nend\nbstolua_tryfixprint = ""\nend\n`,
+        "tryfixprint": `local bstolua_tryfixprint=""\n`,
+        "charat": `function bstolua_charat(s,n)\nreturn string.sub(s,n-1,n-1)\nend\n`,
+        "input": `function bstolua_input(s)\io.write(s)\nio.flush()\nbstolua_tryfixprint = io.read()\nreturn bstolua_tryfixprint\nend\n`,
+        "strcon": `function bstolua_strcon(...)\nlocal result=""\nfor i,v in ipairs({...}) do\nresult=result..v\nend\nreturn result\nend\n`,
+        "format": `function bstolua_format(f, ...)\nlocal a={...}\nlocal r=f:gsub("%\${}","%%s")\nreturn string.format(r,unpack(a))\nend\n`,
+        "math.sqrt": `function bstolua_math_sqrt(n)\nreturn n^0.5\nend\n`,
+        "math.round": `function bstolua_math_round(n)\nreturn math.floor(n+0.5)\nend\n`,
+        "exec": `function bstolua_exec(c)\nlocal h=io.popen(c)\nlocal r=h:read("*a")\nh:close()\nreturn r\nend\n`,
+        "setTimeout": `function bstolua_setTimeout(c,t)\nlocal s=os.clock()\nrepeat until os.clock()>s+(t/1000)\nc()\nend\n`,
+        "setInterval": `function bstolua_setInterval(c,t)\nlocal s=os.clock()\nrepeat until os.clock()>s+(t/1000)\nc()\nbstolua_setInterval(c,t)\nend\n`,
+        "fetch": `function bstolua_fetch(p, o)\n\to = o or {}\n\tlocal h\n\tlocal m = o.method or "GET"\n\tlocal b = o.body or ""\nlocal t = "Content-Type: " .. (o.content_type or "text/plain")\n\tlocal c = "curl -s -X " .. m .. " " .. p .. ' -H "' .. t .. '"'\n\tif b ~= "" then\n\t\tc = c .. ' -d "' .. string.gsub(b, '"', '\\\\"') .. '"'\n\tend\n\th = io.popen(c)\n\tif not h then\n\t\treturn nil, "Failed to execute command: " .. c\n\tend\n\tlocal c = h:read("*a")\n\th:close()\n\treturn c\nend\n`,
+        "fs.read": `function bstolua_fs_read(f)\nlocal g=io.open(f, "r")\nlocal c=g:read("*a")\nio.close(g)\nreturn c\nend\n`,
+        "fs.write": `function bstolua_fs_write(f,d)\nlocal g=io.open(f, "w")\ng:write(d)\nio.close(g)\nend\n`,
+        "fs.exists": `function bstolua_fs_exists(f)\nlocal g=io.open(f, "r")\nif g then\nio.close(g)\nreturn true\nreturn false\nend\n`,
+        "fs.rmdir": `function bstolua_fs_rmdir(f)\nif package.config:sub(1,1)=="\\\\" then\nos.execute("rmdir /s /q \\""..f.."\\"")\nelse\nos.execute("rm -r \\""..f.."\\"")\nend\n`,
+        "objects.hasKey": `function bstolua_objects_hasKey(o,k)\nreturn o[k]~=nil\nend\n`,
+        "objects.get": `function bstolua_objects_get(o,k)\nreturn o[k]\nend\n`,
+        "objects.set": `function bstolua_objects_set(o,k,v)\no[k]=v\nend\n`,
+        "error": `local error = "";\n`,
+    };
 
     transcribe(ast: Program): string {
         let program = this.transcribeStmt(ast, 0)
@@ -34,54 +40,51 @@ export class Transcriber {
         return program;
     }
 
+    private addBC(key: string): void {
+        if(this.added.includes(key)) return;
+        if(!this.bstolua_code[key]) throw "Transcriber error: No code for " + key;
+
+        this.added.push(key);
+        this.beginCode += this.bstolua_code[key];
+    }
+
     private defaultFunctionFix(functionName: string): string {
         switch(functionName) {
 
-            // 2 characters !!!
+            // print with input() fix
             case "println":
-                return "print";
+                this.addBC("tryfixprint");
+                this.addBC("println");
+                return "bstolua_println";
 
             // string stuff
             case "len":
                 return "string.len";
             case "charat":
-                if(!this.charat) {
-                    this.charat = true;
-                    this.beginCode += `function bstolua_charat(s,n)\nreturn string.sub(s,n-1,n-1)\nend\n`;
-                }
+                this.addBC("charat");
                 return "bstolua_charat";
             case "input":
-                if(!this.input) {
-                    this.input = true;
-                    this.beginCode += `function bstolua_input(s)\io.write(s)\nio.flush()\nreturn io.read()\nend\n`;
-                }
+                this.addBC("tryfixprint");
+                this.addBC("input");
                 return "bstolua_input";
             case "strcon":
-                if(!this.strcon) {
-                    this.strcon = true;
-                    this.beginCode += `function bstolua_strcon(...)\nlocal result=""\nfor i,v in ipairs({...}) do\nresult=result..v\nend\nreturn result\nend\n`;
-                }
+                this.addBC("strcon");
                 return "bstolua_strcon";
             case "format":
-                if(!this.format) {
-                    this.format = true;
-                    this.beginCode += `function bstolua_format(f, ...)\nlocal a={...}\nlocal r=f:gsub("%\${}","%%s")\nreturn string.format(r,unpack(a))\nend\n`;
-                }
+                this.addBC("format");
                 return "bstolua_format";
 
             // face made his math stuff the same as lua! well, except for the fact that lua doesn't have sqrt or round though. WHY!?!?!
             case "math.sqrt":
-                if(!this.math_sqrt) {
-                    this.math_sqrt = true;
-                    this.beginCode += `function bstolua_math_sqrt(n)\nreturn n^0.5\nend\n`;
-                }
+                this.addBC("math.sqrt");
                 return "bstolua_math_sqrt";
             case "math.round":
-                if(!this.math_round) {
-                    this.math_round = true;
-                    this.beginCode += `function bstolua_math_round(n)\nreturn math.floor(n+0.5)\nend\n`;
-                }
+                this.addBC("math.round");
                 return "bstolua_math_round"
+            case "math.toNumber":
+                return "tonumber";
+            case "math.toString":
+                return "tostring";
 
             // time
             case "time":
@@ -89,80 +92,47 @@ export class Transcriber {
 
             // exec
             case "exec":
-                if(!this.exec) {
-                    this.exec = true;
-                    this.beginCode += `function bstolua_exec(c)\nlocal h=io.popen(c)\nlocal r=h:read("*a")\nh:close()\nreturn r\nend\n`;
-                }
+                this.addBC("exec");
                 return "bstolua_exec";
 
             // surprisingly i didnt have to change much for these to work. yay to lua?
             case "setTimeout":
-                if(!this.setTimeout) {
-                    this.setTimeout = true;
-                    this.beginCode += `function bstolua_setTimeout(c,t)\nlocal s=os.clock()\nrepeat until os.clock()>s+(t/1000)\nc()\nend\n`;
-                }
+                this.addBC("setTimeout");
                 return "bstolua_setTimeout";
             case "setInterval":
-                if(!this.setInterval) {
-                    this.setInterval = true;
-                    this.beginCode += `function bstolua_setInterval(c,t)\nlocal s=os.clock()\nrepeat until os.clock()>s+(t/1000)\nc()\nbstolua_setInterval(c,t)\nend\n`;
-                }
+                this.addBC("setInterval");
                 return "bstolua_setInterval";
 
             // wtf
             case "fetch":
-                if(!this.fetch) {
-                    this.fetch = true;
-                    this.beginCode += `function bstolua_fetch(p, o)\n\to = o or {}\n\tlocal h\n\tlocal m = o.method or "GET"\n\tlocal b = o.body or ""\nlocal t = "Content-Type: " .. (o.content_type or "text/plain")\n\tlocal c = "curl -s -X " .. m .. " " .. p .. ' -H "' .. t .. '"'\n\tif b ~= "" then\n\t\tc = c .. ' -d "' .. string.gsub(b, '"', '\\\\"') .. '"'\n\tend\n\th = io.popen(c)\n\tif not h then\n\t\treturn nil, "Failed to execute command: " .. c\n\tend\n\tlocal c = h:read("*a")\n\th:close()\n\treturn c\nend\n`;
-                }
+                this.addBC("fetch");
                 return "bstolua_fetch";
 
             // nevermind kys lua
             case "fs.read":
-                if(!this.fs_read) {
-                    this.fs_read = true;
-                    this.beginCode += `function bstolua_fs_read(f)\nlocal g=io.open(f, "r")\nlocal c=g:read("*a")\nio.close(g)\nreturn c\nend\n`;
-                }
+                this.addBC("fs.read");
                 return "bstolua_fs_read";
             case "fs.write":
-                if(!this.fs_write) {
-                    this.fs_write = true;
-                    this.beginCode += `function bstolua_fs_write(f,d)\nlocal g=io.open(f, "w")\ng:write(d)\nio.close(g)\nend\n`;
-                }
+                this.addBC("fs.write");
                 return "bstolua_fs_write";
             case "fs.exists":
-                if(!this.fs_exists) {
-                    this.fs_exists = true;
-                    this.beginCode += `function bstolua_fs_exists(f)\nlocal g=io.open(f, "r")\nif g then\nio.close(g)\nreturn true\nreturn false\nend\n`
-                }
+                this.addBC("fs.exists");
                 return "bstolua_fs_exists";
             case "fs.rmdir":
-                if(!this.fs_rmdir) {
-                    this.fs_rmdir = true;
-                    this.beginCode += `function bstolua_fs_rmdir(f)\nif package.config:sub(1,1)=="\\\\" then\nos.execute("rmdir /s /q \\""..f.."\\"")\nelse\nos.execute("rm -r \\""..f.."\\"")\nend\n`;
-                }
+                this.addBC("fs.rmdir");
                 return "bstolua_fs_rmdir";
             case "fs.rm":
                 return "os.remove";
 
             // these are very simple but since this just changes function name i gotta include it :sob:
             case "objects.hasKey":
-                if(!this.objects_hasKey) {
-                    this.objects_hasKey = true;
-                    this.beginCode += `function bstolua_objects_hasKey(o,k)\nreturn o[k]~=nil\nend\n`;
-                }
+                this.addBC("objects.hasKey");
                 return "bstolua_objects_hasKey";
             case "objects.get":
-                if(!this.objects_get) {
-                    this.objects_get = true;
-                    this.beginCode += `function bstolua_objects_get(o,k)\nreturn o[k]\nend\n`;
-                }
+                this.addBC("objects.get");
                 return "bstolua_objects_get";
             case "objects.set":
-                if(!this.objects_set) {
-                    this.objects_set = true;
-                    this.beginCode += `function bstolua_objects_set(o,k,v)\no[k]=v\nend\n`;
-                }
+                this.addBC("objects.set");
                 return "bstolua_objects_set";
 
             // silly billy exit command :3
@@ -254,9 +224,8 @@ export class Transcriber {
                     if(first.kind == "IfStatement") {
                         alternate = `else${this.transcribeStmt(first, 0)}`;
                     } else {
-                        expr.alternate.push(first);
-                        // WHY DO I HAVE TO REVERSE THIS.WHTA THE FUCK FACE
-                        alternate = `else\n${expr.alternate.reverse().map(val => this.transcribeStmt(val, 0)).join("")}\nend`;
+                        expr.alternate.unshift(first);
+                        alternate = `else\n${expr.alternate.map(val => this.transcribeStmt(val, 0)).join("")}\nend`;
                     }
                 }
                 return `${ifVal}${alternate}`;
@@ -303,18 +272,15 @@ export class Transcriber {
                     expr.alternate.map(val => this.transcribeStmt(val, 0)).join(""),
                     `end`
                 );
-                if(!this.error) {
-                    this.error = true;
-                    this.beginCode += `local error = "";\n`;
-                }
+                this.addBC("error");
                 this.trycatchCounter++;
                 return res;
             }
             case "MemberExpr": {
                 const expr = (value as MemberExpr);
                 const symbol = this.transcribeStmt(expr.object, 0);
-                const prop = this.transcribeStmt(expr.property, 0);
-                return expr.property.kind == "NumericLiteral" ? `${symbol}[${prop}]` : `${symbol}.${prop}`;
+                let prop = this.transcribeStmt(expr.property, 0);
+                return expr.computed ? `${symbol}[${prop} + 1]` : `${symbol}.${prop}`;
             }
             case "ForStatement": {
                 const expr = (value as ForStatement);
