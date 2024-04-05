@@ -10,31 +10,44 @@ export class Transcriber {
     private added: string[] = [];
 
     private bstolua_code: {[key: string]: string} = {
-        "println": `function bstolua_println(t)\nif bstolua_tryfixprint ~= t then\nprint(t)\nend\nbstolua_tryfixprint = nil\nend\n`,
-        "tryfixprint": `local bstolua_tryfixprint=nil\n`,
+
+        "error": `local error = "";\n`,
+
+        "tryfixprint": `local bstolua_tryfixprint=nil;\n`,
+        "println": `function bstolua_println(t)\nif bstolua_tryfixprint ~= t or bstolua_tryfixprint == nil then\nprint(t)\nend\nbstolua_tryfixprint = nil\nend\n`,
+        
         "charat": `function bstolua_charat(s,n)\nreturn string.sub(s,n-1,n-1)\nend\n`,
         "input": `function bstolua_input(s)\io.write(s)\nio.flush()\nbstolua_tryfixprint = io.read()\nreturn bstolua_tryfixprint\nend\n`,
         "strcon": `function bstolua_strcon(...)\nlocal result=""\nfor i,v in ipairs({...}) do\nresult=result..v\nend\nreturn result\nend\n`,
         "format": `function bstolua_format(f, ...)\nlocal a={...}\nlocal r=f:gsub("%\${}","%%s")\nreturn string.format(r,unpack(a))\nend\n`,
-        "math.sqrt": `function bstolua_math_sqrt(n)\nreturn n^0.5\nend\n`,
-        "math.round": `function bstolua_math_round(n)\nreturn math.floor(n+0.5)\nend\n`,
-        "exec": `function bstolua_exec(c)\nlocal h=io.popen(c)\nlocal r=h:read("*a")\nh:close()\nreturn r\nend\n`,
-        "setTimeout": `function bstolua_setTimeout(c,t)\nlocal s=os.clock()\nrepeat until os.clock()>s+(t/1000)\nc()\nend\n`,
-        "setInterval": `function bstolua_setInterval(c,t)\nlocal s=os.clock()\nrepeat until os.clock()>s+(t/1000)\nc()\nbstolua_setInterval(c,t)\nend\n`,
-        "fetch": `function bstolua_fetch(p, o)\n\to = o or {}\n\tlocal h\n\tlocal m = o.method or "GET"\n\tlocal b = o.body or ""\nlocal t = "Content-Type: " .. (o.content_type or "text/plain")\n\tlocal c = "curl -s -X " .. m .. " " .. p .. ' -H "' .. t .. '"'\n\tif b ~= "" then\n\t\tc = c .. ' -d "' .. string.gsub(b, '"', '\\\\"') .. '"'\n\tend\n\th = io.popen(c)\n\tif not h then\n\t\treturn nil, "Failed to execute command: " .. c\n\tend\n\tlocal c = h:read("*a")\n\th:close()\n\treturn c\nend\n`,
+        "trim": `function bstolua_trim(s)\nif type(s) ~= "string" then\nerror("Input must be string")\nend\nreturn s:gsub("^%s+", ""):gsub("%s+$", "")\nend\n`,
+        "splitstr": `function bstolua_splitstr(inputstr, sep)\nif sep == nil then\nsep = "%s"\nend\nlocal t = {}\nfor str in string.gmatch(inputstr, "([^" .. sep .. "]+)") do\ntable.insert(t, str)\nend\nreturn t\nend\n`,
+        "len": `function bstolua_len(n)\nif type(n) == "string" then\nreturn string.len(n)\nelseif type(n) == "table" then\nreturn #n\nelse\nerror("Cannot get length of type: " .. type(n))\nend\nend\n`,
+
+        "base64.encode": `function bstolua_base64_encode(data)\nlocal b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'\nreturn ((data:gsub('.', function(x)\nlocal r,b='',x:byte()\nfor i=8,1,-1 do r=r..(b%2^i-b%2^(i-1)>0 and '1' or '0') end\nreturn r;\nend)..'0000'):gsub('%d%d%d?%d?%d?%d?', function(x)\nif (#x < 6) then return '' end\nlocal c=0\nfor i=1,6 do c=c+(x:sub(i,i)=='1' and 2^(6-i) or 0) end\nreturn b:sub(c+1,c+1)\nend)..({ '', '==', '=' })[#data%3+1])\nend\n`,
+        "base64.decode": `function bstolua_base64_decode(data)\nlocal b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'\ndata = string.gsub(data, '[^'..b..'=]', '')\nreturn (data:gsub('.', function(x)\nif (x == '=') then return '' end\nlocal r,f='',(b:find(x)-1)\nfor i=6,1,-1 do r=r..(f%2^i-f%2^(i-1)>0 and '1' or '0') end\nreturn r;\nend):gsub('%d%d%d?%d?%d?%d?%d?%d?', function(x)\nif (#x ~= 8) then return '' end\nlocal c=0\nfor i=1,8 do c=c+(x:sub(i,i)=='1' and 2^(8-i) or 0) end\nreturn string.char(c)\nend))\nend\n`,
+        
         "fs.read": `function bstolua_fs_read(f)\nlocal g=io.open(f, "r")\nlocal c=g:read("*a")\nio.close(g)\nreturn c\nend\n`,
         "fs.write": `function bstolua_fs_write(f,d)\nlocal g=io.open(f, "w")\ng:write(d)\nio.close(g)\nend\n`,
         "fs.exists": `function bstolua_fs_exists(f)\nlocal g=io.open(f, "r")\nif g then\nio.close(g)\nreturn true\nreturn false\nend\n`,
         "fs.rmdir": `function bstolua_fs_rmdir(f)\nif package.config:sub(1,1)=="\\\\" then\nos.execute("rmdir /s /q \\""..f.."\\"")\nelse\nos.execute("rm -r \\""..f.."\\"")\nend\n`,
+       
         "objects.hasKey": `function bstolua_objects_hasKey(o,k)\nreturn o[k]~=nil\nend\n`,
         "objects.get": `function bstolua_objects_get(o,k)\nreturn o[k]\nend\n`,
         "objects.set": `function bstolua_objects_set(o,k,v)\no[k]=v\nend\n`,
-        "error": `local error = "";\n`,
-        "base64.encode": `function bstolua_base64_encode(data)\nlocal b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'\nreturn ((data:gsub('.', function(x)\nlocal r,b='',x:byte()\nfor i=8,1,-1 do r=r..(b%2^i-b%2^(i-1)>0 and '1' or '0') end\nreturn r;\nend)..'0000'):gsub('%d%d%d?%d?%d?%d?', function(x)\nif (#x < 6) then return '' end\nlocal c=0\nfor i=1,6 do c=c+(x:sub(i,i)=='1' and 2^(6-i) or 0) end\nreturn b:sub(c+1,c+1)\nend)..({ '', '==', '=' })[#data%3+1])\nend\n`,
-        "base64.decode": `function bstolua_base64_decode(data)\nlocal b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'\ndata = string.gsub(data, '[^'..b..'=]', '')\nreturn (data:gsub('.', function(x)\nif (x == '=') then return '' end\nlocal r,f='',(b:find(x)-1)\nfor i=6,1,-1 do r=r..(f%2^i-f%2^(i-1)>0 and '1' or '0') end\nreturn r;\nend):gsub('%d%d%d?%d?%d?%d?%d?%d?', function(x)\nif (#x ~= 8) then return '' end\nlocal c=0\nfor i=1,8 do c=c+(x:sub(i,i)=='1' and 2^(8-i) or 0) end\nreturn string.char(c)\nend))\nend\n`,
-        "trim": `function bstolua_trim(s)\nif type(s) ~= "string" then\nerror("Input must be string")\nend\nreturn s:gsub("^%s+", ""):gsub("%s+$", "")\nend\n`,
-        "splitstr": `function bstolua_splitstr(inputstr, sep)\nif sep == nil then\nsep = "%s"\nend\nlocal t = {}\nfor str in string.gmatch(inputstr, "([^" .. sep .. "]+)") do\ntable.insert(t, str)\nend\nreturn t\nend\n`,
-        "len": `function bstolua_len(n)\nif type(n) == "string" then\nreturn string.len(n)\nelseif type(n) == "table" then\nreturn #n\nelse\nerror("Cannot get length of type: " .. type(n))\nend\nend\n`,
+
+        "math.sqrt": `function bstolua_math_sqrt(n)\nreturn n^0.5\nend\n`,
+        "math.round": `function bstolua_math_round(n)\nreturn math.floor(n+0.5)\nend\n`,
+        
+        "timeoutids":`local bstolua_timeoutids={};\nfunction bstolua_gentimeoutid()\nlocal id;\nrepeat\nid = math.random(999999)\nuntil bstolua_timeoutids[id] == nil\nbstolua_timeoutids[id] = 1\nreturn id\nend\n`,
+        "setTimeout": `function bstolua_setTimeout(c,t)\nlocal id=bstolua_gentimeoutid();\nfunction run()\nlocal s=os.clock()\nrepeat until os.clock()>s+(t/1000)\nif bstolua_timeoutids[id] ~= nil then\nc()\nend\nend\nrun()\nreturn id\nend\n`,
+        "setInterval": `function bstolua_setInterval(c,t)\nlocal id=bstolua_gentimeoutid();\nfunction run()\nlocal s=os.clock()\nrepeat until os.clock()>s+(t/1000)\nif bstolua_timeoutids[id] ~= nil then\nc()\nbstolua_setInterval(c,t)\nend\nend\nrun()\nreturn id\nend\n`,
+        "clearTimeout": `function bstolua_clearTimeout(i)\nbstolua_timeoutids[i] = nil\nend\n`,
+
+        "fetch": `function bstolua_fetch(p, o)\n\to = o or {}\n\tlocal h\n\tlocal m = o.method or "GET"\n\tlocal b = o.body or ""\nlocal t = "Content-Type: " .. (o.content_type or "text/plain")\n\tlocal c = "curl -s -X " .. m .. " " .. p .. ' -H "' .. t .. '"'\n\tif b ~= "" then\n\t\tc = c .. ' -d "' .. string.gsub(b, '"', '\\\\"') .. '"'\n\tend\n\th = io.popen(c)\n\tif not h then\n\t\treturn nil, "Failed to execute command: " .. c\n\tend\n\tlocal c = h:read("*a")\n\th:close()\n\treturn c\nend\n`,
+        
+        "exec": `function bstolua_exec(c)\nlocal h=io.popen(c)\nlocal r=h:read("*a")\nh:close()\nreturn r\nend\n`,
+
     };
 
     transcribe(ast: Program): string {
@@ -89,11 +102,10 @@ export class Transcriber {
                 return "bstolua_math_sqrt";
             case "math.round":
                 this.addBC("math.round");
-                return "bstolua_math_round"
-            case "math.toNumber":
+                return "bstolua_math_round";
+
+            case "parseNumber":
                 return "tonumber";
-            case "math.toString":
-                return "tostring";
 
             // time
             case "time":
@@ -106,11 +118,19 @@ export class Transcriber {
 
             // surprisingly i didnt have to change much for these to work. yay to lua?
             case "setTimeout":
+                this.addBC("timeoutids");
                 this.addBC("setTimeout");
                 return "bstolua_setTimeout";
             case "setInterval":
+                this.addBC("timeoutids");
                 this.addBC("setInterval");
                 return "bstolua_setInterval";
+            // Same thing lmao
+            case "clearTimeout":
+            case "clearInterval":
+                this.addBC("timeoutids");
+                this.addBC("clearTimeout");
+                return "bstolua_clearTimeout";
 
             // wtf
             case "fetch":
