@@ -1,5 +1,5 @@
 import { Program } from "../../../bussin/dist/frontend/ast";
-import { ArrayLiteral, AssignmentExpr, BinaryExpr, CallExpr, ForStatement, FunctionDeclaration, Identifier, IfStatement, MemberExpr, NodeType, NumericLiteral, ObjectLiteral, Stmt, StringLiteral, TryCatchStatement, VarDeclaration } from "../bussin_parser/ast";
+import { ArrayLiteral, AssignmentExpr, BinaryExpr, CallExpr, Expr, ForStatement, FunctionDeclaration, Identifier, IfStatement, MemberExpr, NodeType, NumericLiteral, ObjectLiteral, Stmt, StringLiteral, TryCatchStatement, VarDeclaration } from "../bussin_parser/ast";
 
 export class Transcriber {
 
@@ -10,8 +10,8 @@ export class Transcriber {
     private added: string[] = [];
 
     private bstolua_code: {[key: string]: string} = {
-        "println": `function bstolua_println(t)\nif bstolua_tryfixprint ~= t then\nprint(t)\nend\nbstolua_tryfixprint = ""\nend\n`,
-        "tryfixprint": `local bstolua_tryfixprint=""\n`,
+        "println": `function bstolua_println(t)\nif bstolua_tryfixprint ~= t then\nprint(t)\nend\nbstolua_tryfixprint = nil\nend\n`,
+        "tryfixprint": `local bstolua_tryfixprint=nil\n`,
         "charat": `function bstolua_charat(s,n)\nreturn string.sub(s,n-1,n-1)\nend\n`,
         "input": `function bstolua_input(s)\io.write(s)\nio.flush()\nbstolua_tryfixprint = io.read()\nreturn bstolua_tryfixprint\nend\n`,
         "strcon": `function bstolua_strcon(...)\nlocal result=""\nfor i,v in ipairs({...}) do\nresult=result..v\nend\nreturn result\nend\n`,
@@ -30,10 +30,15 @@ export class Transcriber {
         "objects.get": `function bstolua_objects_get(o,k)\nreturn o[k]\nend\n`,
         "objects.set": `function bstolua_objects_set(o,k,v)\no[k]=v\nend\n`,
         "error": `local error = "";\n`,
+        "base64.encode": `function bstolua_base64_encode(data)\nlocal b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'\nreturn ((data:gsub('.', function(x)\nlocal r,b='',x:byte()\nfor i=8,1,-1 do r=r..(b%2^i-b%2^(i-1)>0 and '1' or '0') end\nreturn r;\nend)..'0000'):gsub('%d%d%d?%d?%d?%d?', function(x)\nif (#x < 6) then return '' end\nlocal c=0\nfor i=1,6 do c=c+(x:sub(i,i)=='1' and 2^(6-i) or 0) end\nreturn b:sub(c+1,c+1)\nend)..({ '', '==', '=' })[#data%3+1])\nend\n`,
+        "base64.decode": `function bstolua_base64_decode(data)\nlocal b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'\ndata = string.gsub(data, '[^'..b..'=]', '')\nreturn (data:gsub('.', function(x)\nif (x == '=') then return '' end\nlocal r,f='',(b:find(x)-1)\nfor i=6,1,-1 do r=r..(f%2^i-f%2^(i-1)>0 and '1' or '0') end\nreturn r;\nend):gsub('%d%d%d?%d?%d?%d?%d?%d?', function(x)\nif (#x ~= 8) then return '' end\nlocal c=0\nfor i=1,8 do c=c+(x:sub(i,i)=='1' and 2^(8-i) or 0) end\nreturn string.char(c)\nend))\nend\n`,
+        "trim": `function bstolua_trim(s)\nif type(s) ~= "string" then\nerror("Input must be string")\nend\nreturn s:gsub("^%s+", ""):gsub("%s+$", "")\nend\n`,
+        "splitstr": `function bstolua_splitstr(inputstr, sep)\nif sep == nil then\nsep = "%s"\nend\nlocal t = {}\nfor str in string.gmatch(inputstr, "([^" .. sep .. "]+)") do\ntable.insert(t, str)\nend\nreturn t\nend\n`,
+        "len": `function bstolua_len(n)\nif type(n) == "string" then\nreturn string.len(n)\nelseif type(n) == "table" then\nreturn #n\nelse\nerror("Cannot get length of type: " .. type(n))\nend\nend\n`,
     };
 
     transcribe(ast: Program): string {
-        let program = this.transcribeStmt(ast, 0)
+        let program = this.transcribeStmt(ast);
         if(this.beginCode != "") {
             program = `--begin bstolua data--\n\n${this.beginCode}\n--end bstolua data--\n\n${program}`;
         }
@@ -57,9 +62,10 @@ export class Transcriber {
                 this.addBC("println");
                 return "bstolua_println";
 
-            // string stuff
+            // stuff
             case "len":
-                return "string.len";
+                this.addBC("len");
+                return "bstolua_len";
             case "charat":
                 this.addBC("charat");
                 return "bstolua_charat";
@@ -73,6 +79,9 @@ export class Transcriber {
             case "format":
                 this.addBC("format");
                 return "bstolua_format";
+            case "splitstr":
+                this.addBC("splitstr");
+                return "bstolua_splitstr";
 
             // face made his math stuff the same as lua! well, except for the fact that lua doesn't have sqrt or round though. WHY!?!?!
             case "math.sqrt":
@@ -143,6 +152,19 @@ export class Transcriber {
             case "import":
                 throw "import() is not supported by this transcriber. This is because.. I'm too tired right now.";
 
+            // base64: https://devforum.roblox.com/t/base64-encoding-and-decoding-in-lua/1719860/2
+            case "base64.decode":
+                this.addBC("base64.decode");
+                return "bstolua_base64_decode";
+            case "base64.encode":
+                this.addBC("base64.encode");
+                return "bstolua_base64_encode";
+
+            // trim
+            case "trim":
+                this.addBC("trim");
+                return "bstolua_trim";
+ 
             default:
                 return functionName;
         }
@@ -159,45 +181,42 @@ export class Transcriber {
             case "return":
                 return "_return";
             default:
-                return variableName;
+                return this.defaultFunctionFix(variableName);
         }
     }
 
-    private transcribeStmt(value: Stmt, depthInfo: number): string {
+    private fnReturnAssign(val: Expr, depthInfo: number): string {
+        const transcription = this.transcribeStmt(val, depthInfo);
+        if(depthInfo != 1 || !this.canReturn(val.kind)) return transcription;
+
+        if(val.kind == "FunctionDeclaration" && (val as FunctionDeclaration).name != "<anonymous>") {
+            return `${transcription}\nbstolua_return = ${(val as FunctionDeclaration).name};`;
+        }
+        return `bstolua_return = ${transcription};`;
+    }
+
+    private transcribeStmt(value: Stmt, depthInfo: number = 0): string {
         switch(value.kind) {
             case "Program":
                 let res = "";
                 (value as Program).body.forEach(value => {
-                    res += this.transcribeStmt(value, 0);
+                    res += this.transcribeStmt(value);
                 })
                 return res;
             case "NumericLiteral":
                 return (value as NumericLiteral).value.toString();
             case "FunctionDeclaration": {
                 const expr = (value as FunctionDeclaration);
-                let fn = `function${depthInfo != Number.MIN_VALUE ? " " + expr.name : ""}(${expr.parameters.join(",")})`;
-                let returnedAlready = false;
-                expr.body.forEach((value, index) => {
-                    if(!returnedAlready && this.canReturn(value.kind)) {
-                        let addReturn = true;
-                        for (let i = index + 1; i < expr.body.length; i++) {
-                            if (expr.body[i].kind !== "NewLine") {
-                                addReturn = false;
-                                break;
-                            }
-                        }
-                        if(addReturn) {
-                            fn += "return ";
-                            returnedAlready = true;
-                        }
-                    }
-                    fn += this.transcribeStmt(value, 0);
-                });                
-                return `${fn}end`;
+                let fn = `function${(depthInfo != Number.MIN_VALUE && expr.name != "<anonymous>") ? " " + expr.name : ""}(${expr.parameters.join(",")})\nlocal bstolua_return;\n`;
+                expr.body.forEach(value => {
+                    fn += this.fnReturnAssign(value, 1);
+                });
+                const res = `${fn}\nreturn bstolua_return\nend\n`;
+                return expr.name == "<anonymous>" ? `(${res})` : res;
             }
             case "CallExpr": {
                 const expr = (value as CallExpr);
-                return `${this.defaultFunctionFix(this.transcribeStmt(expr.caller, 0))}(${expr.args.map((val) => this.transcribeStmt(val, Number.MIN_VALUE)).join(", ")})`;
+                return `${this.defaultFunctionFix(this.transcribeStmt(expr.caller))}(${expr.args.map((val) => this.transcribeStmt(val, Number.MIN_VALUE)).join(", ")})`;
             }
             case "StringLiteral":
                 return `"${(value as StringLiteral).value.replace(/"/g, `"..'"'.."`).split("\n").join("\\n")}"`;
@@ -205,15 +224,15 @@ export class Transcriber {
                 return this.defaultVariableFix((value as Identifier).symbol);
             case "VarDeclaration": {
                 const expr = (value as VarDeclaration);
-                return `local ${this.defaultVariableFix(expr.identifier)} = ${this.transcribeStmt(expr.value, 0)};`;
+                return `local ${this.defaultVariableFix(expr.identifier)} = ${this.transcribeStmt(expr.value)};`;
             }
             case "NewLine":
                 return "\n";
             case "IfStatement": {
                 const expr = (value as IfStatement);
-                let ifVal = `if ${this.transcribeStmt(expr.test, 0)} then`;
+                let ifVal = `if ${this.transcribeStmt(expr.test)} then\n`;
                 expr.body.forEach((value) => {
-                    ifVal += this.transcribeStmt(value, depthInfo);
+                    ifVal += this.fnReturnAssign(value, depthInfo);
                 });
                 let alternate = "end";
                 if(expr.alternate.length > 0) {
@@ -222,13 +241,13 @@ export class Transcriber {
                         first = expr.alternate.shift();
                     } while(first.kind == "NewLine");
                     if(first.kind == "IfStatement") {
-                        alternate = `else${this.transcribeStmt(first, 0)}`;
+                        alternate = `else${this.transcribeStmt(first)}`;
                     } else {
                         expr.alternate.unshift(first);
-                        alternate = `else\n${expr.alternate.map(val => this.transcribeStmt(val, 0)).join("")}\nend`;
+                        alternate = `else\n${expr.alternate.map(val => this.fnReturnAssign(val, depthInfo)).join("")}\nend\n`;
                     }
                 }
-                return `${ifVal}${alternate}`;
+                return `${ifVal}\n${alternate}`;
             }
             case "BinaryExpr": {
                 const expr = (value as BinaryExpr);
@@ -248,8 +267,8 @@ export class Transcriber {
                         break;
                 }
                 // idk it works
-                let left = `${this.transcribeStmt(expr.left, 0)}`;
-                let right = `${this.transcribeStmt(expr.right, 0)}`;
+                let left = this.transcribeStmt(expr.left);
+                let right = this.transcribeStmt(expr.right);
                 if(expr.right.kind == "BinaryExpr") {
                     if(expr.left.kind == "BinaryExpr") left = `(${left})`;
                     if(operator == "*" || operator == "/") right = `(${right})`;
@@ -258,37 +277,37 @@ export class Transcriber {
             }
             case "ObjectLiteral": {
                 const expr = (value as ObjectLiteral);
-                return `{ ${expr.properties.map(val => val.value ? `${val.key} = ${this.transcribeStmt(val.value, 0)}` : `${val.key} = ${val.key}`).join(", ")} }`;
+                return `{ ${expr.properties.map(val => val.value ? `${val.key} = ${this.transcribeStmt(val.value)}` : `${val.key} = ${val.key}`).join(", ")} }`;
             }
             case "ArrayLiteral": {
                 const expr = (value as ArrayLiteral);
-                return `{ ${expr.values.map(val => this.transcribeStmt(val, 0))} }`;
+                return `{ ${expr.values.map(val => this.transcribeStmt(val))} }`;
             }
             case "TryCatchStatement": {
                 const expr = (value as TryCatchStatement);
-                const res = `local bstolua_success_${this.trycatchCounter}, bstolua_err_${this.trycatchCounter} = pcall(function()`.concat(
-                    expr.body.map(val => this.transcribeStmt(val, 0)).join(""),
-                    `end)\nif not bstolua_success_${this.trycatchCounter} then\nerror = bstolua_err_${this.trycatchCounter};`,
-                    expr.alternate.map(val => this.transcribeStmt(val, 0)).join(""),
-                    `end`
-                );
                 this.addBC("error");
                 this.trycatchCounter++;
-                return res;
+                const thisTC = this.trycatchCounter - 1;
+                return `local bstolua_success_${thisTC}, bstolua_err_${thisTC} = pcall(function()\n`.concat(
+                    expr.body.map(val => this.fnReturnAssign(val, depthInfo)).join(""),
+                    `\nend)\nif not bstolua_success_${thisTC} then\nerror = bstolua_err_${thisTC};\n`,
+                    expr.alternate.map(val => this.fnReturnAssign(val, depthInfo)).join(""),
+                    `\nend\n`
+                );
             }
             case "MemberExpr": {
                 const expr = (value as MemberExpr);
-                const symbol = this.transcribeStmt(expr.object, 0);
-                let prop = this.transcribeStmt(expr.property, 0);
+                const symbol = this.transcribeStmt(expr.object);
+                let prop = this.transcribeStmt(expr.property);
                 return expr.computed ? `${symbol}[${prop} + 1]` : `${symbol}.${prop}`;
             }
             case "ForStatement": {
                 const expr = (value as ForStatement);
-                return `${this.transcribeStmt(expr.init, 0)}\nwhile ${this.transcribeStmt(expr.test, 0)} do\n${expr.body.map(val => this.transcribeStmt(val, 0)).join("")}\n${this.transcribeStmt(expr.update, 0)}\nend`;
+                return `${this.transcribeStmt(expr.init)}\nwhile ${this.transcribeStmt(expr.test)} do\n${expr.body.map(val => this.fnReturnAssign(val, depthInfo)).join("")}\n${this.transcribeStmt(expr.update)}\nend\n`;
             }
             case "AssignmentExpr": {
                 const expr = (value as AssignmentExpr);
-                return `${this.defaultVariableFix(this.transcribeStmt(expr.assigne, 0))} = ${this.transcribeStmt(expr.value, 0)}`;
+                return `${this.defaultVariableFix(this.transcribeStmt(expr.assigne))} = ${this.transcribeStmt(expr.value)}`;
             }
             default:
                 return `<No transcription for "${value.kind}">`;

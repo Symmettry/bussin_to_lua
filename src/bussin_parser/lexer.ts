@@ -40,9 +40,10 @@ export enum TokenType {
     And, // &&
     Ampersand, // &
     Bar, // |
-    
+    Optional, // ?
+
     EOF, // Signified the end of file.
-    NewLine, // new line
+    NewLine, // newline
 }
 
 /**
@@ -79,6 +80,7 @@ const TOKEN_CHARS: Record<string, TokenType> = {
     ":": TokenType.Colon,
     ",": TokenType.Comma,
     "|": TokenType.Bar,
+    "?": TokenType.Optional,
     "\n": TokenType.NewLine,
 };
 
@@ -189,16 +191,13 @@ export function tokenize(sourceCode: string): Token[] {
                         tokens.push(token("!", TokenType.Exclamation));
                     }
                     break;
-                case '"':
+                case '"': {
                     let str = "";
                     src.shift();
         
                     let escaped = false;
                     while (src.length > 0) {
                         const key = src.shift();
-
-                        if(key == undefined) throw "The world is over.";
-
                         if(key == "\\") {
                             escaped = !escaped;
                             if(escaped)continue;
@@ -208,10 +207,12 @@ export function tokenize(sourceCode: string): Token[] {
                             }
                             escaped = false;
                         } else if (escaped) {
+                            escaped = false;
                             if(ESCAPED[key]) {
-                                escaped = false;
                                 str += ESCAPED[key];
                                 continue;
+                            } else {
+                                str += `\\`;
                             }
                         }
                         str += key;
@@ -220,6 +221,7 @@ export function tokenize(sourceCode: string): Token[] {
                     // append new string token.
                     tokens.push(token(str, TokenType.String));
                     break;
+                }
                 case "-":
                 case "+":
                     if(src[1] == src[0]) {
@@ -233,7 +235,7 @@ export function tokenize(sourceCode: string): Token[] {
                         src.shift();
                         break;
                     }
-                    // no break here to flow into the next case for += and -=
+                // eslint-disable-next-line no-fallthrough
                 case "*":
                 case "/":
                     if (src[1] == "=") {
@@ -266,6 +268,7 @@ export function tokenize(sourceCode: string): Token[] {
                             break;
                         }
                     }
+                // eslint-disable-next-line no-fallthrough
                 default:
 
                     if(tokenType) {

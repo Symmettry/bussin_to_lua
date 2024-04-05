@@ -48,8 +48,8 @@ export interface Program extends Stmt {
 
 export interface VarDeclaration extends Stmt {
   kind: "VarDeclaration";
-  constant: boolean,
-  identifier: string,
+  constant: boolean;
+  identifier: string;
   value?: Expr;
 }
 
@@ -142,13 +142,13 @@ export interface StringLiteral extends Expr {
 
 export interface Property extends Expr {
   kind: "Property";
-  key: string,
-  value?: Expr,
+  key: string;
+  value?: Expr;
 }
 
 export interface ObjectLiteral extends Expr {
   kind: "ObjectLiteral";
-  properties: Property[]
+  properties: Property[];
 }
 
 export interface ArrayLiteral extends Expr {

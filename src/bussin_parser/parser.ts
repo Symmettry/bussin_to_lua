@@ -185,7 +185,26 @@ export default class Parser {
     }
 
     private parse_expr(): Expr {
-        return this.parse_assignment_expr();
+        const data = this.parse_assignment_expr();
+
+        // before returning, if it's a ternary we don't want to return the direct value.
+        if(this.at().type == TokenType.Optional) {
+            if(data.kind != "BinaryExpr" && data.kind != "Identifier") {
+                throw new Error("Expected BinaryExpr or Identifier following ternary expression.");
+            }
+            this.eat();
+
+            const left = this.parse_expr();
+
+            this.expect(TokenType.Colon, "Colon (\":\") expected following left side of ternary operator (\"?\").");
+
+            const right = this.parse_expr();
+            
+            const ifStmt = { kind: "IfStatement", test: data, body: [left], alternate: [right] } as IfStatement;
+            return {kind:"CallExpr",args:[],caller:{kind:"FunctionDeclaration",parameters:[],name:"<anonymous>",body:[ifStmt]} as FunctionDeclaration} as CallExpr;
+        }
+
+        return data;
     }
 
     private parse_assignment_expr(): Expr {
@@ -211,7 +230,7 @@ export default class Parser {
             left = {
                 kind: "BinaryExpr",
                 left, right, operator
-            } as BinaryExpr
+            } as BinaryExpr;
         }
 
         return left;
@@ -249,7 +268,10 @@ export default class Parser {
 
         while (this.not_eof() && this.at().type != TokenType.CloseBrace) {
             // { key: val, key2: val }
-            const key = this.expect(TokenType.Identifier, "Identifier expected following \"Object\" expression.").value;
+            if(this.at().type != TokenType.Identifier && this.at().type != TokenType.String) {
+                throw new Error("Identifier expected following \"Object\" expression.");
+            }
+            const key = this.eat().value;
 
             // Allows shorthand key: pair -> { key, }
             if (this.at().type == TokenType.Comma) {
@@ -263,17 +285,17 @@ export default class Parser {
             }
             // { key: val }
 
-            this.expect(TokenType.Colon, "Semicolon (\";\") expected following \"identifier\" in \"Object\" expression.");
+            this.expect(TokenType.Colon, "Colon (\":\") expected following \"identifier\" in \"Object\" expression.");
             const value = this.parse_expr();
 
             properties.push({ key, value, kind: "Property" });
 
             if (this.at().type != TokenType.CloseBrace) {
-                this.expect(TokenType.Comma, "Comma (\";\") or closing brace (\"}\") expected after \"property\" declaration.");
+                this.expect(TokenType.Comma, "Comma (\",\") or closing brace (\"}\") expected after \"property\" declaration.");
             }
         }
 
-        this.expect(TokenType.CloseBrace, "Closing brace (\"}\") expected at the end of \"Object\" expression.")
+        this.expect(TokenType.CloseBrace, "Closing brace (\"}\") expected at the end of \"Object\" expression.");
         return { kind: "ObjectLiteral", properties } as ObjectLiteral;
     }
 
@@ -437,13 +459,14 @@ export default class Parser {
                 } as StringLiteral;
             case TokenType.Fn:
                 return this.parse_function_declaration();
-            case TokenType.OpenParen:
+            case TokenType.OpenParen: {
                 this.eat(); // eat the opening paren
                 const value = this.parse_expr();
 
                 this.expect(TokenType.CloseParen, "Unexpected token (?) found while parsing arguments."); // closing paren
 
                 return value;
+            }
             case TokenType.NewLine:
                 this.eat();
                 return {
