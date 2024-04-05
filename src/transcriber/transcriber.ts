@@ -176,11 +176,10 @@ export class Transcriber {
                 return "nil";
             case "args":
                 return "arg";
-            case "break":
-                return "_break";
-            case "return":
-                return "_return";
             default:
+                if(variableName.match("_*?(break|return)")) {
+                    return `_${variableName}`;
+                }
                 return this.defaultFunctionFix(variableName);
         }
     }
